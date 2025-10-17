@@ -23,14 +23,14 @@ data _df_clean0;
   DF = prxchange('s/\b([A-Z0-9,\/\-\s]+)\s+\1+\b/$1/i', -1, strip(DF));
 run;
 
-/* --- 1) Canonicalize DF -> DF_BASE + DF_MOD --- */
 data want_df;
   set _df_clean0;
 
   length DF_NORM $200 DF_BASE $40 DF_MOD $120 DF_CANON $120;
   DF_NORM = upcase(compbl(strip(DF)));
 
-  /* ---- BASE FORM (ordered checks; first match wins) ---- */
+  /* index(string, substring) 
+  select when is much like if-then statments but with multiple mutually exculsive conditions*/
   select;
     when (index(DF_NORM,'TABLET'))               DF_BASE='TABLET';
     when (index(DF_NORM,'CAPSULE'))              DF_BASE='CAPSULE';
@@ -79,19 +79,19 @@ data want_df;
     when (index(DF_NORM,'INTRAUTERINE DEVICE'))  DF_BASE='DEVICE';
     when (index(DF_NORM,'INHALANT'))             DF_BASE='INHALANT';
     when (index(DF_NORM,'BAR, CHEWABLE'))        DF_BASE='BAR';
-    otherwise DF_BASE=''; /* non-DF strings will be blank; you already moved those out */
+    otherwise DF_BASE=''; 
   end;
 
   /* ---- MODIFIERS (may accumulate, comma-separated) ---- */
   length mods $200;
   mods = '';
 
-  /* release characteristics */
+ /*catx function combines strings and seperate them with a delimiter*/
+  
   if index(DF_NORM,'EXTENDED RELEASE')      then mods = catx(', ', mods, 'ER');
   if index(DF_NORM,'DELAYED RELEASE')       then mods = catx(', ', mods, 'DR');
   if index(DF_NORM,'ORALLY DISINTEGRATING') then mods = catx(', ', mods, 'ODT');
 
-  /* structure/packaging qualifiers */
   if index(DF_NORM,'COATED PARTICLES')      then mods = catx(', ', mods, 'COATED PARTICLES');
   if index(DF_NORM,'COATED PELLETS')        then mods = catx(', ', mods, 'COATED PELLETS');
   if index(DF_NORM,'PELLETS') and DF_BASE^='PELLET'
@@ -119,20 +119,11 @@ data want_df;
     if missing(DF_MOD) then DF_CANON = DF_BASE;
     else DF_CANON = cats(DF_BASE,' (',DF_MOD,')');
   end;
-  else DF_CANON = ''; /* non-DF or already moved out */
+  else DF_CANON = ''; 
   
   drop DF_NORM mods;
 run;
 
-/* --- 2) QC examples --- */
-proc freq data=want_df;
-  tables DF DF_BASE DF_MOD DF_CANON / missing;
-run;
-
-/* e.g., top 20 canonical forms */
-proc freq data=want_df order=freq;
-  tables DF_CANON / nocum;
-run;
 
 data FDAIngredient2;
 	set Want_df;
@@ -145,20 +136,24 @@ proc freq data=FDAIngredient2;
 	Table DF_Canon;
 	run;
 
-/* Move non-dosage-form values to INGREDIENT3 using SELECT...WHEN */
+
 data ob_done;
-  set FDAIngredient2;   /* <-- replace with your dataset */
+  set FDAIngredient2;   
 
   length INGREDIENT3 $200 DF_BASE $100;
 
-  /* Pull the "base" token (before '(' or ','), in UPPER for matching */
+  
   length _canon $300;
-  _canon = upcase(compbl(strip(coalescec(DF_CANON, ''))));
+  /* compbl is much like strip
+  the coalesce function is used to select the first non-missing value
+  in a list of numeric variables. Returns the first non-blank value
+  */
+  _canon = upcase(compbl(strip(coalescec(DF_CANON, '')))); *the  '' represent the default value to return if
+  all values are missing;
   if index(_canon,'(') then DF_BASE = strip(scan(_canon,1,'('));
   else if index(_canon,',') then DF_BASE = strip(scan(_canon,1,','));
   else DF_BASE = _canon;
 
-  /* Whitelist: TRUE dosage forms (routes like ORAL/OPHTHALMIC are NOT here) */
   select (DF_BASE);
     when ('AEROSOL','BAR','CAPSULE','CONTACT LENS','CREAM','DISC','DRESSING','DROPS',
           'ELIXIR','ENEMA','FILM','GAS','GEL','GRANULE','GUM','IMPLANT','INHALANT',
@@ -167,11 +162,11 @@ data ob_done;
           'SPONGE','SPRAY','SUPPOSITORY','SUSPENSION','SWAB','SYRUP','SYSTEM','TABLET',
           'TAMPON','TAPE','RING', 'FOR SUSPENSION', 'DENTAL', 'DEVICE', 'SOLUTION/DROPS', 
           'SUSPENSION/DROPS', 'TOPICAL', 'INTRAVENOUS')
-      do; /* valid DF -> keep DF_CANON as-is */ end;
+      do;  end;
 
-    otherwise do;  /* NOT a dosage form: move it */
+    otherwise do;  
       INGREDIENT3 = coalescec(DF_CANON, DF);
-      call missing(DF_CANON);      /* optional: blank DF_CANON for these */
+      call missing(DF_CANON);     
     end;
   end;
 
@@ -289,7 +284,7 @@ data FDARoute;
 	if Route= "ORAL-28" then Route1= "ORAL";
 	run;
 
-
+ /*ingredient ingredient2 ingredient3 are not completely cleaned*/
 data organizing;
 	retain Ingredient Ingredient2 Ingredient3 DF_Canon Route
 	Route1 Trade_Name Applicant;
